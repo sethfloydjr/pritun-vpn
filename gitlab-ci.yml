@@ -1,0 +1,90 @@
+# Official image for Hashicorp's Terraform. It uses light image which is Alpine
+# based as it is much...lighter.
+#
+# Entrypoint is also needed as image by default sets `terraform` binary as an
+# entrypoint.
+image:
+  name: hashicorp/terraform:$TERRAFORM_VERSION
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+# Default output file for Terraform plan
+variables:
+  PLAN: plan.tfplan
+  DESTROYPLAN: destroyplan.tfplan
+
+cache:
+  paths:
+    - .terraform
+
+before_script:
+  - export AWS_ACCESS_KEY_ID=$TF_VAR_AWS_ACCESS_KEY_ID
+  - export AWS_SECRET_ACCESS_KEY=$TF_VAR_AWS_SECRET_ACCESS_KEY
+  - terraform --version
+  - terraform init -backend=true -get=true -input=false
+
+stages:
+  - validate
+  - plan
+  - apply
+  - destroyplan
+  - destroy
+
+validate:
+  stage: validate
+  script:
+    - terraform validate
+
+plan:
+  stage: plan
+  script:
+    - terraform plan -out=$PLAN
+  artifacts:
+    name: plan
+    paths:
+      - .archive_files
+      - $PLAN
+
+# Separate apply job for manual launching Terraform as it can be destructive action.
+apply:
+  stage: apply
+  environment:
+    name: Pritunl VPN Stack
+  script:
+    - terraform apply "$PLAN"
+  dependencies:
+    - plan
+  when: manual
+  only:
+    - master
+
+
+# Separate Destroy job for manual launching Terraform as it can be destructive action.
+destroyplan:
+  stage: destroyplan
+  environment:
+    name: Pritunl VPN Stack
+  script:
+    - terraform init -backend=true -get=true -input=false
+    - terraform plan -destroy -out=$DESTROYPLAN
+  artifacts:
+    name: destroyplan
+    paths:
+      - $DESTROYPLAN
+  when: manual
+  only:
+    - master
+
+destroy:
+  stage: destroy
+  environment:
+    name: Pritunl VPN Stack
+  script:
+    - terraform init -backend=true -get=true -input=false
+    - terraform apply "$DESTROYPLAN"
+  dependencies:
+    - destroyplan
+  when: manual
+  only:
+    - master
